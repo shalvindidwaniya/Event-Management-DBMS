@@ -5,7 +5,7 @@ const adminSchema = new mongoose.Schema(
     {
         admin_id: {
             type: String,
-            requird: true,
+            required: true,
         },
         email: {
             type: String,
@@ -17,15 +17,18 @@ const adminSchema = new mongoose.Schema(
         name: {
             type: String,
         },
-        eventCreated: [],
+        eventCreated: {
+            type: [String], // Array of event IDs created by the admin
+            default: [], // Initialize with an empty array
+        },
 
         expireAt: {
             type: Date,
             default: Date.now,
-            index: { expires: "2592000s" },
+            index: { expires: "2592000s" },// 30 days in seconds
         },
     },
-    { timestamps: true }
+    { timestamps: true } // Automatically adds createdAt and updatedAt fields
 );
 
 const Admin = mongoose.model("Admin", adminSchema);

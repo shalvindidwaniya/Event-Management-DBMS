@@ -9,6 +9,11 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 const nodemailer = require("nodemailer");
 
+const getAdminFromToken = async (token) => {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    return Admin.findById(decoded.adminId);
+};
+
 function sendCheckInMail(data) {
     let transporter = nodemailer.createTransport({
         service: "gmail",
@@ -56,8 +61,22 @@ const postEvent = async (req, res) => {
     const Cover = req.body.cover;
     const Organizer = req.body.organizer;
 
-    const adminId = req.body.admin_id;
-    console.log("Admin mil gaya: ", adminId);
+    const adminToken = req.body.admin_id;
+
+    if (!adminToken) {
+        return res.status(401).send({ msg: "Missing admin token" });
+    }
+
+    let admin;
+    try {
+        admin = await getAdminFromToken(adminToken);
+    } catch (error) {
+        return res.status(401).send({ msg: "Invalid or expired admin token" });
+    }
+
+    if (!admin) {
+        return res.status(404).send({ msg: "No such admin exists" });
+    }
 
     const secret = JWT_SECRET;
     const payload = {
@@ -89,7 +108,7 @@ const postEvent = async (req, res) => {
     }
 
     Admin.updateOne(
-        { admin_id: adminId },
+        { _id: admin._id },
         {
             $push: {
                 eventCreated: {
@@ -145,7 +164,22 @@ const particularEvent = async (req, res) => {
 
 const deleteEvent = async (req, res) => {
     const eventId = req.body.event_id;
-    const adminId = req.body.admin_id;
+    const adminToken = req.body.admin_id;
+
+    if (!adminToken) {
+        return res.status(401).send({ msg: "Missing admin token" });
+    }
+
+    let admin;
+    try {
+        admin = await getAdminFromToken(adminToken);
+    } catch (error) {
+        return res.status(401).send({ msg: "Invalid or expired admin token" });
+    }
+
+    if (!admin) {
+        return res.status(404).send({ msg: "No such admin exists" });
+    }
 
     Event.deleteOne({ event_id: eventId }, function (err) {
         if (err) return handleError(err);
@@ -155,7 +189,7 @@ const deleteEvent = async (req, res) => {
     });
 
     Admin.updateOne(
-        { admin_id: adminId },
+        { _id: admin._id },
         { $pull: { eventCreated: { event_id: eventId } } },
         function (err) {
             if (err) return handleError(err);

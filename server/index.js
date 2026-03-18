@@ -16,7 +16,7 @@ const eventRouter = require("./routes/eventRoutes");
 // const checkInRouter = require("./routes/checkInRoutes")
 
 dotenv.config();
-console.log("in index - ", process.env.MONGO_ATLAS_URI);
+// console.log("in index - ", process.env.MONGO_ATLAS_URI);
 //database url
 mongoose
     .connect(process.env.MONGO_ATLAS_URI, {
@@ -50,6 +50,8 @@ app.get("/", (req, res) => {
     res.send("Event Management micro services API.");
 });
 
-app.listen(process.env.PORT || 5000, () => {
-    console.log(`Server Running on🚀: ${process.env.PORT}`);
+const port = process.env.PORT || 5000;
+
+app.listen(port, () => {
+    console.log(`Server Running on🚀: ${port}`);
 });

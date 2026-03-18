@@ -13,10 +13,10 @@ const otpSchema = new mongoose.Schema(
         expireAt: {
             type: Date,
             default: Date.now,
-            index: { expires: "300s" },
+            index: { expires: "300s" }, //5min
         },
     },
-    { timestamps: true }
+    { timestamps: true } // Automatically adds createdAt and updatedAt fields
 );
 
 module.exports = mongoose.model("OtpAuth", otpSchema);

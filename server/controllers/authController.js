@@ -1,8 +1,7 @@
-const express = require("express");
-const app = express();
 const OtpAuth = require("../models/otpAuth");
 const User = require("../models/user");
 const bcrypt = require("bcrypt");
+const { randomUUID } = require("crypto");
 const dotenv = require("dotenv");
 dotenv.config();
 const otpGenerator = require("otp-generator");
@@ -11,260 +10,190 @@ const { sendSMS } = require("./smsController");
 
 const jwt = require("jsonwebtoken");
 const JWT_SECRET = process.env.JWT_SECRET;
-console.log("in auth - ", JWT_SECRET);
+const ALLOW_TEST_OTP_BYPASS = process.env.ALLOW_TEST_OTP_BYPASS === "true";
 
-const cookieParser = require("cookie-parser");
-app.use(cookieParser());
+const createUserIdentity = () => `usr_${randomUUID()}`;
 
-// route - http://localhost:5000/user/signin
+const signUserToken = (user) => {
+    return jwt.sign(
+        {
+            userId: user._id.toString(),
+            userToken: user.user_token,
+            email: user.email,
+            role: "user",
+        },
+        JWT_SECRET,
+        { expiresIn: "7d" }
+    );
+};
+
+const createAndSaveOtp = async (email) => {
+    await OtpAuth.deleteMany({ email: email });
+
+    const generatedOtp = otpGenerator.generate(6, {
+        digits: true,
+        upperCaseAlphabets: false,
+        specialChars: false,
+        lowerCaseAlphabets: false,
+    });
+
+    await sendSMS(email, generatedOtp);
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedOtp = await bcrypt.hash(generatedOtp, salt);
+
+    await OtpAuth.create({
+        email: email,
+        otp: hashedOtp,
+    });
+};
+
+// route - http://localhost:8000/user/signin
 const signIn = async (req, res) => {
-    const Email = req.body.email;
+    try {
+        const Email = req.body.email;
 
-    User.find({ email: Email }, async function (err, docs) {
-        if (docs.length !== 0) {
-            //clearing otp auth table
-            try {
-                await OtpAuth.deleteMany({ email: Email }, function (err) {
-                    if (err) {
-                        console.log(err);
-                    } else {
-                        console.log("Users deleted successfully");
-                    }
-                });
-            } catch (e) {
-                console.log(e);
-            }
+        if (!Email) {
+            return res.status(400).send({ msg: "Email is required" });
+        }
 
-            // generate otp for new user
-            const OTP = otpGenerator.generate(6, {
-                digits: true,
-                upperCaseAlphabets: false,
-                specialChars: false,
-                lowerCaseAlphabets: false,
-            });
-
-            const otp = {
-                email: Email,
-                otp: OTP,
-            };
-
-            sendSMS(Email, otp.otp);
-
-            console.log("Generated otp for signin: ", otp);
-            //encrypting the otp and then saving to Otp_table
-            const salt = await bcrypt.genSalt(10);
-            otp.otp = await bcrypt.hash(otp.otp, salt);
-
-            const newUserLogin = new OtpAuth({
-                email: otp.email,
-                otp: otp.otp,
-            });
-
-            newUserLogin.save((error, success) => {
-                if (error) console.log(error);
-                else
-                    console.log("Saved::otp-temporarily::ready for validation");
-            });
-
-            return res.status(200).send({ msg: "Otp sent successfully!" });
-        } else {
+        const existingUser = await User.findOne({ email: Email });
+        if (!existingUser) {
             return res.status(400).send({
                 msg: "This Email ID is not registered. Try Signing Up instead!",
             });
         }
-    });
+
+        await createAndSaveOtp(Email);
+        return res.status(200).send({ msg: "Otp sent successfully!" });
+    } catch (error) {
+        console.log(error);
+        return res.status(500).send({ msg: "Unable to process sign-in" });
+    }
 };
 
-// route - http://localhost:5000/user/signup
+// route - http://localhost:8000/user/signup
 const signUp = async (req, res) => {
-    const Email = req.body.email;
+    try {
+        const Email = req.body.email;
 
-    //validating whether user already exists or not
+        if (!Email) {
+            return res.status(400).send({ msg: "Email is required" });
+        }
 
-    User.find({ email: Email }, async function (err, docs) {
-        if (docs.length !== 0) {
+        const existingUser = await User.findOne({ email: Email });
+        if (existingUser) {
             return res.status(400).send({
                 msg: "This Email ID is already registered. Try Signing In instead!",
             });
-        } else {
-            //clearing otp auth table
-            try {
-                await OtpAuth.deleteMany({ email: Email }, function (err) {
-                    if (err) {
-                        console.log(err);
-                    } else {
-                        console.log("Users deleted successfully");
-                    }
-                });
-            } catch (e) {
-                console.log(e);
-            }
-
-            // generate otp for new user
-            const OTP = otpGenerator.generate(6, {
-                digits: true,
-                upperCaseAlphabets: false,
-                specialChars: false,
-                lowerCaseAlphabets: false,
-            });
-
-            const otp = {
-                email: Email,
-                otp: OTP,
-            };
-            console.log("Before hashing: ", otp);
-
-            sendSMS(Email, otp.otp);
-
-            //encrypting the otp and then saving to Otp_table
-            const salt = await bcrypt.genSalt(10);
-            otp.otp = await bcrypt.hash(otp.otp, salt);
-
-            const newUserLogin = new OtpAuth({
-                email: otp.email,
-                otp: otp.otp,
-            });
-
-            newUserLogin.save((error, success) => {
-                if (error) console.log(error);
-                else console.log("Saved::otp::ready for validation");
-            });
-
-            return res.status(200).send({ msg: "Otp sent successfully!" });
         }
-    });
+
+        await createAndSaveOtp(Email);
+        return res.status(200).send({ msg: "Otp sent successfully!" });
+    } catch (error) {
+        console.log(error);
+        return res.status(500).send({ msg: "Unable to process sign-up" });
+    }
 };
 
-// route - http://localhost:5000/user/signin/verify
+// route - http://localhost:8000/user/signin/verify
 const verifyLogin = async (req, res) => {
-    const Email = req.body.email;
-    const inputOtp = req.body.otp;
+    try {
+        const Email = req.body.email;
+        const inputOtp = req.body.otp;
 
-    // Check if the input OTP is "0000"
-    if (inputOtp === "0000") {
-        User.find({ email: Email }, async function (err, user) {
-            if (user.length === 0) {
-                return res.status(400).send({ msg: "User not found!" });
-            } else {
-                res.status(200).send({
-                    msg: "Sign-In successful!",
-                    user_id: user[0].user_token,
-                });
+        if (!Email || !inputOtp) {
+            return res.status(400).send({ msg: "Email and OTP are required" });
+        }
+
+        const user = await User.findOne({ email: Email });
+        if (!user) {
+            return res.status(400).send({ msg: "User not found!" });
+        }
+
+        if (!(ALLOW_TEST_OTP_BYPASS && inputOtp === "0000")) {
+            const otpDoc = await OtpAuth.findOne({ email: Email });
+            if (!otpDoc) {
+                return res
+                    .status(400)
+                    .send({ msg: "The OTP expired. Please try again!" });
             }
-        });
-        return;
-    }
 
-    OtpAuth.find({ email: Email }, async function (err, docs) {
-        if (docs.length === 0) {
-            return res
-                .status(400)
-                .send({ msg: "The OTP expired. Please try again!" });
-        } else {
-            const generatedOtp = docs[0].otp;
-
-            const validUser = await bcrypt.compare(inputOtp, generatedOtp);
-
-            if (Email === docs[0].email && validUser) {
-                User.find({ email: Email }, async function (err, user) {
-                    console.log(user);
-                    res.status(200).send({
-                        msg: "Sign-In successful!",
-                        user_id: user[0].user_token,
-                    });
-                });
-            } else {
+            const validUser = await bcrypt.compare(inputOtp, otpDoc.otp);
+            if (!validUser) {
                 return res
                     .status(406)
                     .send({ msg: "OTP does not match. Please try again!" });
             }
         }
-    });
+
+        const accessToken = signUserToken(user);
+        return res.status(200).send({
+            msg: "Sign-In successful!",
+            user_id: accessToken,
+        });
+    } catch (error) {
+        console.log(error);
+        return res.status(500).send({ msg: "Unable to verify login" });
+    }
 };
 
-// route - http://localhost:5000/user/signup/verify
+// route - http://localhost:8000/user/signup/verify
 const verifyOtp = async (req, res) => {
-    const number = req.body.contactNumber;
-    const inputOtp = req.body.otp;
-    const Email = req.body.email;
-    const name = req.body.username;
+    try {
+        const number = req.body.contactNumber;
+        const inputOtp = req.body.otp;
+        const Email = req.body.email;
+        const name = req.body.username;
 
-    // Check if the input OTP is "0000"
-    if (inputOtp === "0000") {
-        const secret = JWT_SECRET;
-        const payload = {
-            email: Email,
-        };
-        const token = jwt.sign(payload, secret);
+        if (!number || !inputOtp || !Email || !name) {
+            return res.status(400).send({ msg: "Missing required signup fields" });
+        }
 
-        //saving new user
-        const newUser = new User({
-            user_token: token,
-            username: name,
-            email: Email,
-            contactNumber: number,
-        });
-
-        newUser.save((error, success) => {
-            if (error) console.log(error);
-            else console.log("Signup successful: ", newUser);
-        });
-
-        return res.status(200).send({
-            msg: "Account creation successful!",
-            user_id: token,
-        });
-    }
-
-    OtpAuth.find({ email: Email }, async function (err, docs) {
-        if (docs.length === 0) {
-            return res.status(400).send("The OTP expired. Please try again!");
-        } else {
-            const generatedOtp = docs[0].otp;
-
-            const validUser = await bcrypt.compare(inputOtp, generatedOtp);
-
-            if (Email === docs[0].email && validUser) {
-                const secret = JWT_SECRET;
-                const payload = {
-                    email: req.body.email,
-                };
-                const token = jwt.sign(payload, secret);
-
-                //saving new user
-                const newUser = new User({
-                    user_token: token,
-                    username: name,
-                    email: Email,
-                    contactNumber: number,
-                });
-
-                newUser.save((error, success) => {
-                    if (error) console.log(error);
-                    else console.log("Signup successful: ", newUser);
-                });
-
-                OtpAuth.deleteMany({ email: Email }, async function (err) {
-                    if (err) {
-                        console.log(err);
-                    } else {
-                        console.log(`OTP table for ${Email} cleared.`);
-                    }
-                });
-
+        if (!(ALLOW_TEST_OTP_BYPASS && inputOtp === "0000")) {
+            const otpDoc = await OtpAuth.findOne({ email: Email });
+            if (!otpDoc) {
                 return res
-                    .status(200)
-                    .send({
-                        msg: "Account creation successful!",
-                        user_id: token,
-                    });
-            } else {
+                    .status(400)
+                    .send({ msg: "The OTP expired. Please try again!" });
+            }
+
+            const validUser = await bcrypt.compare(inputOtp, otpDoc.otp);
+            if (!validUser) {
                 return res
                     .status(400)
                     .send({ msg: "OTP does not match. Please try again!" });
             }
         }
-    });
+
+        const existingUser = await User.findOne({ email: Email });
+        if (existingUser) {
+            const accessToken = signUserToken(existingUser);
+            return res.status(200).send({
+                msg: "Account creation successful!",
+                user_id: accessToken,
+            });
+        }
+
+        const newUser = await User.create({
+            user_token: createUserIdentity(),
+            username: name,
+            email: Email,
+            contactNumber: number,
+        });
+
+        await OtpAuth.deleteMany({ email: Email });
+
+        const accessToken = signUserToken(newUser);
+
+        return res.status(200).send({
+            msg: "Account creation successful!",
+            user_id: accessToken,
+        });
+    } catch (error) {
+        console.log(error);
+        return res.status(500).send({ msg: "Unable to verify signup OTP" });
+    }
 };
 
 module.exports = {
