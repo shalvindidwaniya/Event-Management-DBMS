@@ -9,6 +9,7 @@ import { AiOutlinePlus } from "react-icons/ai";
 import { FaUsers } from "react-icons/fa";
 import { RxHamburgerMenu } from "react-icons/rx";
 
+//actually we are displaying the registered events of the user here
 function UserDashboard() {
     const router = useRouter();
     const picRatio = 0.606;

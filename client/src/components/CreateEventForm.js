@@ -50,25 +50,35 @@ const CreateEvent = () => {
             admin_id: admin_id,
         };
 
-        // Send POST request to server with request body
-        const response = await fetch(
-            `${process.env.NEXT_PUBLIC_API_URL}/post/event`,
-            {
+        try {
+            // Send POST request to server with request body
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/post/event`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify(requestBody),
+            });
+
+            let data = {};
+            try {
+                data = await response.json();
+            } catch (parseError) {
+                console.error("Unable to parse create event response", parseError);
             }
-        );
-        const data = await response.json();
-        if (response.status === 200) {
-            // If request was successful, show success message and redirect to dashboard
-            alert("Event Created Successfully");
-            router.push("/admin/dashboard");
-        } else {
-            // If request failed, log error message to console
+
+            if (response.ok) {
+                // Backend returns 201 on successful create.
+                alert(data.msg || "Event Created Successfully");
+                router.push("/admin/dashboard");
+                return;
+            }
+
             console.error(`Failed with status code ${response.status}`);
+            alert(data.msg || "Failed to create event. Please try again.");
+        } catch (error) {
+            console.error("Create event request failed", error);
+            alert("Unable to connect to server. Please try again.");
         }
     };
 

@@ -35,12 +35,222 @@ const resolveUserFromAccessToken = async (accessToken) => {
     return null;
 };
 
+const resolveClientBaseUrl = (req) => {
+    return (
+        process.env.CLIENT_BASE_URL ||
+        process.env.NEXT_PUBLIC_BASE_URL ||
+        req.headers.origin ||
+        "http://localhost:3000"
+    );
+};
+
+const createCheckoutSession = async (req, res) => {
+    try {
+        const { product, user, event } = req.body;
+
+        if (!product || !user || !event || !event.event_id) {
+            return res.status(400).json({
+                status: "error",
+                message: "Missing required fields",
+            });
+        }
+
+        const existingUser = await resolveUserFromAccessToken(user.user_id);
+        if (!existingUser) {
+            return res.status(401).json({
+                status: "error",
+                message: "Please sign in before payment",
+            });
+        }
+
+        const eventExists = await Event.findOne({ event_id: event.event_id });
+        if (!eventExists) {
+            return res.status(404).json({
+                status: "error",
+                message: "Event not found",
+            });
+        }
+
+        const duplicate = await Event.findOne({
+            event_id: event.event_id,
+            "participants.id": existingUser.user_token,
+        });
+        if (duplicate) {
+            return res.json({ status: "alreadyregistered" });
+        }
+
+        const amount = Number(product.price || eventExists.price);
+        if (!Number.isFinite(amount) || amount <= 0) {
+            return res.status(400).json({
+                status: "error",
+                message: "Invalid event price",
+            });
+        }
+
+        const baseUrl = resolveClientBaseUrl(req);
+        //stripe handles the entire payment UI/UX and redirects back to our app after payment, so we don't need to handle card details or validation on our end
+        const session = await stripe.checkout.sessions.create({
+            mode: "payment",
+            payment_method_types: ["card"],
+            customer_email: existingUser.email,
+            line_items: [
+                {
+                    price_data: {
+                        currency: "inr",
+                        product_data: {
+                            name: product.name || eventExists.name,
+                            description:
+                                product.description ||
+                                `Ticket for ${eventExists.name}`,
+                        },
+                        unit_amount: Math.round(amount * 100),
+                    },
+                    quantity: 1,
+                },
+            ],
+            metadata: {
+                event_id: event.event_id,
+                user_token: existingUser.user_token,
+                product_name: product.name || eventExists.name,
+                product_price: String(amount),
+            },
+            success_url: `${baseUrl}/event/${event.event_id}/payment?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${baseUrl}/event/${event.event_id}/payment?cancelled=true`,
+        });
+
+        return res.json({
+            status: "redirect",
+            sessionId: session.id,
+        });
+    } catch (error) {
+        console.error("Create checkout session failed:", error);
+        return res.status(500).json({
+            status: "error",
+            message: error?.message || "Unable to create checkout session",
+        });
+    }
+};
+
+const confirmCheckoutSession = async (req, res) => {
+    try {
+        const { session_id, user, event } = req.body;
+
+        if (!session_id || !user || !event || !event.event_id) {
+            return res.status(400).json({
+                status: "error",
+                message: "Missing required fields",
+            });
+        }
+
+        const existingUser = await resolveUserFromAccessToken(user.user_id);
+        if (!existingUser) {
+            return res.status(401).json({
+                status: "error",
+                message: "Please sign in before payment confirmation",
+            });
+        }
+
+        const session = await stripe.checkout.sessions.retrieve(session_id);
+        if (session.payment_status !== "paid") {
+            return res.status(400).json({
+                status: "error",
+                message: "Payment is not completed",
+            });
+        }
+
+        const eventId = session.metadata?.event_id || event.event_id;
+        if (eventId !== event.event_id) {
+            return res.status(400).json({
+                status: "error",
+                message: "Event mismatch during payment confirmation",
+            });
+        }
+
+        const eventExists = await Event.findOne({ event_id: eventId });
+        if (!eventExists) {
+            return res.status(404).json({
+                status: "error",
+                message: "Event not found",
+            });
+        }
+
+        const duplicate = await Event.findOne({
+            event_id: eventId,
+            "participants.id": existingUser.user_token,
+        });
+        if (duplicate) {
+            return res.json({ status: "alreadyregistered" });
+        }
+
+        const passId = session.id;
+        await Event.updateOne(
+            { event_id: eventId },
+            {
+                $push: {
+                    participants: {
+                        id: existingUser.user_token,
+                        name: existingUser.username,
+                        email: existingUser.email,
+                        passID: passId,
+                        entry: false,
+                    },
+                },
+            }
+        );
+
+        await User.updateOne(
+            { _id: existingUser._id },
+            { $addToSet: { registeredEvents: eventExists } }
+        );
+
+        let ticketSent = true;
+        try {
+            await sendTicket({
+                email: existingUser.email,
+                event_name: session.metadata?.product_name || eventExists.name,
+                name: existingUser.username,
+                pass: passId,
+                price: session.metadata?.product_price || eventExists.price,
+                address1: "Stripe Checkout",
+                city: "N/A",
+                zip: existingUser.contactNumber || "000000",
+            });
+        } catch (mailError) {
+            ticketSent = false;
+            console.error("Ticket email failed after checkout:", mailError);
+        }
+
+        return res.json({
+            status: "success",
+            ticketSent,
+            message: ticketSent
+                ? "Payment successful and ticket email sent"
+                : "Payment successful but ticket email could not be sent",
+        });
+    } catch (error) {
+        console.error("Confirm checkout session failed:", error);
+        return res.status(500).json({
+            status: "error",
+            message: error?.message || "Unable to confirm checkout session",
+        });
+    }
+};
+//this function is used for testing purposes only, it simulates a successful payment without actually processing any payment, and registers the user for the event directly. This allows us to test the registration flow and email sending without needing to go through the Stripe checkout process every time during development.
+
 const payment = async (req, res) => {
+    //this is now not used in the actual payment flow
     try {
         const { product, token, user, event } = req.body;
         
         if (!product || !token || !user || !event) {
             return res.status(400).json({ error: "Missing required fields" });
+        }
+
+        if (!token.id) {
+            return res.status(400).json({
+                status: "error",
+                message: "Invalid payment token",
+            });
         }
 
         // Validate event exists first
@@ -52,21 +262,51 @@ const payment = async (req, res) => {
             });
         }
 
-        const key = uuid();
+        const key = uuid(); //This key is used for: Stripe idempotencyTicket pass ID
         let status = "error";
-        let check;
 
-        // Process payment
-        const customer = await stripe.customers.create({
-            email: token.email,
-            source: token.id,
-        });
+        // Resolve existing user before charging, so duplicate registrations can be blocked safely.
+        let userToken;
+        let existingUser = null;
+        // First try to use the token provided by the client
+        if (user && user.user_id) {
+            existingUser = await resolveUserFromAccessToken(user.user_id);
+            if (existingUser) {
+                userToken = existingUser.user_token;
+                console.log("Using existing user token from client:", userToken);
+            }
+        }
+        
+        // If no valid token from client, fallback to email lookup
+        if (!userToken) {
+            existingUser = await User.findOne({ email: token.email });
+            if (existingUser) {
+                userToken = existingUser.user_token;
+                console.log("Using existing user token from database:", userToken);
+            }
+        }
 
-        const charge = await stripe.charges.create(
+        // Check if user is already registered for the event before charging.
+        if (userToken) {
+            const existingRegistration = await Event.findOne({
+                event_id: event.event_id,
+                "participants.id": userToken,
+            });
+
+            if (existingRegistration) {
+                console.log("User already registered for this event");
+                status = "alreadyregistered";
+                return res.json({ status });
+            }
+        }
+
+        // Process payment only after duplicate validation.
+        // Charge directly with the tokenized source to avoid missing-card customer errors.
+        await stripe.charges.create(
             {
-                amount: product.price * 100,
+                amount: Number(product.price) * 100,
                 currency: "INR",
-                customer: customer.id,
+                source: token.id,
                 receipt_email: token.email,
                 description: `Booked Ticket for ${product.name}`,
                 shipping: {
@@ -85,54 +325,20 @@ const payment = async (req, res) => {
             }
         );
 
-        console.log("Charge successful: ", charge.id);
-        // Don't set status to success yet - wait until all operations complete
-
-        // Find or create user
-        let userToken;
-        // First try to use the token provided by the client
-        if (user && user.user_id) {
-            const userExists = await resolveUserFromAccessToken(user.user_id);
-            if (userExists) {
-                userToken = userExists.user_token;
-                console.log("Using existing user token from client:", userToken);
-            }
-        }
-        
-        // If no valid token from client, fallback to email lookup
+        // Create user only after successful payment if no existing user was found.
         if (!userToken) {
-            const existingUser = await User.findOne({ email: token.email });
-            
-            if (!existingUser) {
-                userToken = `usr_${randomUUID()}`;
+            userToken = `usr_${randomUUID()}`;
 
-                const newUser = new User({
-                    user_token: userToken,
-                    username: token.billing_name,
-                    email: token.email,
-                    contactNumber: token.shipping_address_zip,
-                });
+            const newUser = new User({
+                user_token: userToken,
+                username: token.billing_name,
+                email: token.email,
+                contactNumber: token.shipping_address_zip,
+            });
 
-                await newUser.save();
-                console.log("New user created: ", newUser);
-            } else {
-                userToken = existingUser.user_token;
-                console.log("Using existing user token from database:", userToken);
-            }
+            await newUser.save();
+            console.log("New user created: ", newUser);
         }
-
-        // Check if user is already registered for the event
-        const existingRegistration = await Event.findOne({
-            event_id: event.event_id,
-            "participants.id": userToken,
-        });
-
-        if (existingRegistration) {
-            console.log("User already registered for this event");
-            status = "alreadyregistered";
-            check = "alreadyregistered";
-            return res.json({ status });
-        } 
         
         // Register user for the event
         try {
@@ -179,12 +385,24 @@ const payment = async (req, res) => {
                 zip: token.shipping_address_zip,
             };
 
-            await sendTicket(Details);
-            console.log("Ticket sent successfully");
+            let ticketSent = true;
+            try {
+                await sendTicket(Details);
+                console.log("Ticket sent successfully");
+            } catch (mailError) {
+                ticketSent = false;
+                console.error("Ticket email failed after successful payment:", mailError);
+            }
             
             // Now set status to success after all operations complete
             status = "success";
-            return res.json({ status });
+            return res.json({
+                status,
+                ticketSent,
+                message: ticketSent
+                    ? "Payment successful and ticket email sent"
+                    : "Payment successful but ticket email could not be sent",
+            });
 
         } catch (dbError) {
             console.error("Database operation failed:", dbError);
@@ -204,6 +422,100 @@ const payment = async (req, res) => {
     }
 };
 
+const mockPayment = async (req, res) => {
+    try {
+        const { product, user, event } = req.body;
+
+        if (!product || !user || !event || !event.event_id) {
+            return res.status(400).json({
+                status: "error",
+                message: "Missing required fields",
+            });
+        }
+
+        const eventExists = await Event.findOne({ event_id: event.event_id });
+        if (!eventExists) {
+            return res.status(404).json({
+                status: "error",
+                message: "Event not found",
+            });
+        }
+
+        const existingUser = await resolveUserFromAccessToken(user.user_id);
+        if (!existingUser) {
+            return res.status(401).json({
+                status: "error",
+                message: "User login required for test payment",
+            });
+        }
+
+        const existingRegistration = await Event.findOne({
+            event_id: event.event_id,
+            "participants.id": existingUser.user_token,
+        });
+
+        if (existingRegistration) {
+            return res.json({ status: "alreadyregistered" });
+        }
+
+        const passId = uuid();
+
+        await Event.updateOne(
+            { event_id: event.event_id },
+            {
+                $push: {
+                    participants: {
+                        id: existingUser.user_token,
+                        name: existingUser.username,
+                        email: existingUser.email,
+                        passID: passId,
+                        entry: false,
+                    },
+                },
+            }
+        );
+
+        await User.updateOne(
+            { _id: existingUser._id },
+            { $addToSet: { registeredEvents: eventExists } }
+        );
+
+        let ticketSent = true;
+        try {
+            await sendTicket({
+                email: existingUser.email,
+                event_name: product.name || eventExists.name,
+                name: existingUser.username,
+                pass: passId,
+                price: product.price || eventExists.price,
+                address1: "Test payment",
+                city: "Test",
+                zip: existingUser.contactNumber || "000000",
+            });
+        } catch (mailError) {
+            ticketSent = false;
+            console.error("Ticket email failed after mock payment:", mailError);
+        }
+
+        return res.json({
+            status: "success",
+            ticketSent,
+            message: ticketSent
+                ? "Test payment successful and ticket email sent"
+                : "Test payment successful but ticket email could not be sent",
+        });
+    } catch (error) {
+        console.error("Mock payment error:", error);
+        return res.status(500).json({
+            status: "error",
+            message: "Test payment failed",
+        });
+    }
+};
+
 module.exports = {
     payment,
+    mockPayment,
+    createCheckoutSession,
+    confirmCheckoutSession,
 };

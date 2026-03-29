@@ -1,4 +1,5 @@
 const Admin = require("../models/admin");
+const { Event } = require("../models/event");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const dotenv = require("dotenv");
@@ -107,10 +108,27 @@ const adminDetails = async (req, res) => {
         }
 
         const decoded = jwt.verify(adminToken, JWT_SECRET);
-        const admin = await Admin.findById(decoded.adminId).select("-pass");
+        const admin = await Admin.findById(decoded.adminId).select("-pass").lean();
 
         if (!admin) {
             return res.status(404).send({ msg: "No such admin exists" });
+        }
+
+        const createdEventIds = Array.isArray(admin.eventCreated)
+            ? admin.eventCreated.filter(Boolean)
+            : [];
+
+        if (createdEventIds.length > 0) {
+            const events = await Event.find({
+                event_id: { $in: createdEventIds },
+            }).lean();
+
+            const eventMap = new Map(events.map((event) => [event.event_id, event]));
+            admin.eventCreated = createdEventIds
+                .map((id) => eventMap.get(id))
+                .filter(Boolean);
+        } else {
+            admin.eventCreated = [];
         }
 
         res.status(200).send(admin);

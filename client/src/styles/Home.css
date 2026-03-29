@@ -30,7 +30,7 @@
 }
 
 .h3 {
-    @apply text-2xl font-semibold leading-tight text-[color:var(--accent-color)] uppercase;
+    @apply text-2xl font-semibold leading-tight text-[#e76666] uppercase;
 }
 
 .h4 {

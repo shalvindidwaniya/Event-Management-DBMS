@@ -144,7 +144,7 @@ const Registration = () => {
                                         Email
                                     </th>
                                     <th className="p-2 bg-gray-100 border border-gray-300">
-                                        Reg. No.
+                                        Pass ID
                                     </th>
                                     <th className="p-2 bg-gray-100 border border-gray-300">
                                         Checked
@@ -179,7 +179,7 @@ const Registration = () => {
                                                 {user.email}
                                             </td>
                                             <td className="p-2 border border-gray-300">
-                                                {user.regno}
+                                                {user.passID}
                                             </td>
                                             <td className="p-2 border border-gray-300 text-center w-1/4">
                                                 <label
@@ -235,7 +235,7 @@ const Registration = () => {
                                         Email
                                     </th>
                                     <th className="p-2 bg-gray-100 border border-gray-300">
-                                        Reg. No.
+                                        Pass ID
                                     </th>
                                 </tr>
                             </thead>
@@ -258,7 +258,7 @@ const Registration = () => {
                                                 {user.email}
                                             </td>
                                             <td className="p-2 border border-gray-300">
-                                                {user.regno}
+                                                {user.passID}
                                             </td>
                                         </tr>
                                     ))}

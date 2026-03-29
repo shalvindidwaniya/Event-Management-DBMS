@@ -50,7 +50,7 @@ app.get("/", (req, res) => {
     res.send("Event Management micro services API.");
 });
 
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 8000;
 
 app.listen(port, () => {
     console.log(`Server Running on🚀: ${port}`);

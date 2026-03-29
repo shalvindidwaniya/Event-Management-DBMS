@@ -72,6 +72,19 @@ export default function Dropdown({ adminData }) {
                         {/* Add other details here */}
                     </div>
                     <div
+                        onClick={() => {
+                            router.push("/admin/setadmin");
+                            setShowDropdown(false);
+                        }}
+                        className="py-4 group hover:bg-[color:var(--primary-color)] transition-all ease-in-out cursor-pointer"
+                    >
+                        <button
+                            className="text-left w-full px-4 text-gray-800 group-hover:text-gray-900 transition-all ease-in-out"
+                        >
+                            Create New Admin
+                        </button>
+                    </div>
+                    <div
                         onClick={handleLogout}
                         className="py-4 group hover:bg-[color:var(--darker-secondary-color)] transition-all ease-in-out"
                     >

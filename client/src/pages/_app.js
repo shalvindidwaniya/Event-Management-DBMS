@@ -13,7 +13,7 @@ export default function App({ Component, pageProps }) {
         <>
             <Head>
                 <link rel="shortcut icon" href="/favicon_io/favicon.ico" />
-                <title>Evently</title>
+                <title>EveNITry</title>
             </Head>
             <Component {...pageProps} />
         </>

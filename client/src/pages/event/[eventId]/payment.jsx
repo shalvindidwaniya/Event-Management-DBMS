@@ -1,15 +1,15 @@
 import NavBar from "@/components/UserNavBar";
 import { getUserToken } from "@/utils/getUserToken";
+import { loadStripe } from "@stripe/stripe-js";
 import Head from "next/head";
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
-import StripeCheckout from "react-stripe-checkout";
 
+const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_KEY || "");
 export default function payment() {
     
     const router = useRouter();
 
-    // const [eventDetails, setEventDetails] = useState({ name: "", price: "" });
     const [name, setName] = useState("");
     const [price, setPrice] = useState("");
     const [product, setProduct] = useState({
@@ -17,6 +17,7 @@ export default function payment() {
         price: "",
         description: "",
     });
+    const [isProcessing, setIsProcessing] = useState(false);
 
     const now = new Date();
     const future = new Date(now.getFullYear() + 2, now.getMonth());
@@ -72,45 +73,151 @@ export default function payment() {
     }
     }, [name, price, event_id]);
 
-    const handleToken = async (event, token, addresses) => {
-        // Fetching user_token cookie value in user_id
+    const handleCheckout = async () => {
         const user_id = getUserToken();
 
-        // console.log("Payment gateway cookie fetch - ", user_id);
+        if (!user_id) {
+            alert("Please sign in before making payment.");
+            return;
+        }
+
+        if (!event_id || !product.name || !product.price) {
+            alert("Event details are not loaded yet. Please wait and retry.");
+            return;
+        }
+
         try {
+            setIsProcessing(true);
             const response = await fetch(
-                `${process.env.NEXT_PUBLIC_API_URL}/payment`,
+                `${process.env.NEXT_PUBLIC_API_URL}/payment/create-checkout-session`,
                 {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
                     },
                     body: JSON.stringify({
-                        token,
                         product,
-                        addresses,
                         user: { user_id },
                         event: { event_id },
                     }),
                 }
             );
-            const data = await response.json();
-            console.log(data);
-            if (data.status === "success") {
-                alert("Payment Successful");
-                router.push("/users/dashboard");
+
+            let data = {};
+            try {
+                data = await response.json();
+            } catch (parseError) {
+                console.error("Unable to parse checkout response", parseError);
             }
-            else if(data.status === "alreadyregistered"){
+
+            if (!response.ok) {
+                alert(data.message || "Payment failed. Please try again.");
+                return;
+            }
+
+            if (data.status === "alreadyregistered") {
                 alert("User is already registered.");
                 router.push("/users/dashboard");
+                return;
             }
-            else {
-                console.error(`Failed with status code ${response.status}`);
+
+            const stripe = await stripePromise;
+            if (!stripe) {
+                alert("Stripe is not initialized. Please refresh and retry.");
+                return;
+            }
+
+            const { error } = await stripe.redirectToCheckout({
+                sessionId: data.sessionId,
+            });
+            if (error) {
+                alert(error.message || "Unable to open payment gateway.");
             }
         } catch (error) {
             console.error(error);
+            alert("Unable to connect to server. Please try again.");
+        } finally {
+            setIsProcessing(false);
         }
     };
+
+    useEffect(() => {
+        const confirmSession = async () => {
+            const sessionId = router.query.session_id;
+            const cancelled = router.query.cancelled;
+
+            if (cancelled === "true") {
+                alert("Payment was cancelled.");
+                router.replace(`/event/${event_id}/payment`, undefined, {
+                    shallow: true,
+                });
+                return;
+            }
+
+            if (!sessionId || !event_id) {
+                return;
+            }
+
+            const user_id = getUserToken();
+            if (!user_id) {
+                return;
+            }
+
+            try {
+                setIsProcessing(true);
+                const response = await fetch(
+                    `${process.env.NEXT_PUBLIC_API_URL}/payment/confirm-checkout-session`,
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            session_id: sessionId,
+                            user: { user_id },
+                            event: { event_id },
+                        }),
+                    }
+                );
+
+                let data = {};
+                try {
+                    data = await response.json();
+                } catch (parseError) {
+                    console.error("Unable to parse confirmation response", parseError);
+                }
+
+                if (!response.ok) {
+                    alert(data.message || "Payment confirmation failed.");
+                    return;
+                }
+
+                if (data.status === "alreadyregistered") {
+                    alert("User is already registered.");
+                    router.push("/users/dashboard");
+                    return;
+                }
+
+                if (data.status === "success") {
+                    alert(
+                        data.ticketSent === false
+                            ? "Payment successful, but ticket email could not be sent."
+                            : "Payment successful. Ticket details have been emailed."
+                    );
+                    router.push("/users/dashboard");
+                }
+            } catch (error) {
+                console.error(error);
+                alert("Unable to verify payment status. Please contact support if needed.");
+            } finally {
+                setIsProcessing(false);
+            }
+        };
+
+        if (router.isReady) {
+            confirmSession();
+        }
+    }, [router.isReady, router.query.session_id, router.query.cancelled, event_id, router]);
 
     
 
@@ -122,7 +229,7 @@ export default function payment() {
                 <link
                     rel="preconnect"
                     href="https://fonts.gstatic.com"
-                    crossorigin
+                    crossOrigin=""
                 />
                 <link
                     href="https://fonts.googleapis.com/css2?family=Puritan&display=swap"
@@ -203,16 +310,14 @@ export default function payment() {
                             </tbody>
                         </table>
                     </div>
-                    <StripeCheckout
-                        className="flex justify-center w-max"
-                        stripeKey={process.env.NEXT_PUBLIC_STRIPE_KEY}
-                        amount={product.price * 100}
-                        token={handleToken}
-                        name={product.name}
-                        currency="INR"
-                        billingAddress
-                        shippingAddress
-                    />
+                    <button
+                        type="button"
+                        onClick={handleCheckout}
+                        disabled={isProcessing}
+                        className="w-full lg:w-1/3 px-6 py-3 rounded-md text-white bg-[color:var(--darker-secondary-color)] hover:bg-[color:var(--secondary-color)] disabled:opacity-60"
+                    >
+                        {isProcessing ? "Processing..." : "Pay Securely with Gateway"}
+                    </button>
                 </div>
             </div>
         </div>

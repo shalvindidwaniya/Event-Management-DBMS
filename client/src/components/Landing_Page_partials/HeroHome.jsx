@@ -33,14 +33,16 @@ function HeroHome() {
                                     Sign In
                                 </a>
                             </div>
-                            <div>
-                                <a
-                                    className="btn text-white bg-gray-700 hover:bg-gray-800 w-full sm:w-auto sm:ml-4"
-                                    href="/users/signup"
-                                >
-                                    Sign Up
-                                </a>
-                            </div>
+                        </div>
+                        <br />
+                        <div  className=" text-gray-600">
+                            Are you a new user to EveNITry?
+                            <a
+                                className="ml-2 text-[1.1rem] font-semibold text-[color:var(--darker-secondary-color)] italic underline decoration-2 underline-offset-4 transition-all duration-200 hover:text-[color:var(--secondary-color)] hover:tracking-wide"
+                                href="/users/signup"
+                            >
+                                Sign Up
+                            </a>
                         </div>
                     </div>
                 </div>

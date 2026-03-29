@@ -23,6 +23,9 @@ export default function signin({ adminIdCookie }) {
     const [step, setStep] = useState(1);
     const [message, setMessage] = useState({ errorMsg: "", successMsg: "" });
     const router = useRouter();
+    const apiBaseUrl = (
+        process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    ).replace(/\/$/, "");
 
     useEffect(() => {
         // If cookie found, Redirect to dashboard
@@ -46,9 +49,10 @@ export default function signin({ adminIdCookie }) {
 
     const handleSubmit = async (event) => {
         event.preventDefault();
-        const response = await fetch(
-            `${process.env.NEXT_PUBLIC_API_URL}/admin/auth`,
-            {
+        setMessage({ errorMsg: "", successMsg: "" });
+
+        try {
+            const response = await fetch(`${apiBaseUrl}/admin/auth`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -57,18 +61,35 @@ export default function signin({ adminIdCookie }) {
                     email: email,
                     password: password,
                 }),
-            }
-        );
-        const data = await response.json();
-        if (response.status === 200) {
-            setMessage({ errorMsg: "", successMsg: data.msg });
-            console.log(data);
-            setStep(2); // Move to next step on the same page
+            });
 
-            setAdminToken(data.admin_token); // set cookie when signed up
-        } else {
+            let data = {};
+            try {
+                data = await response.json();
+            } catch (parseError) {
+                console.error("Failed to parse admin auth response", parseError);
+            }
+
+            if (response.ok) {
+                setMessage({ errorMsg: "", successMsg: data.msg || "Success" });
+                console.log(data);
+                setStep(2); // Move to next step on the same page
+                setAdminToken(data.admin_token); // set cookie when signed up
+                return;
+            }
+
             console.error(`Failed with status code ${response.status}`);
-            setMessage({ errorMsg: data.msg, successMsg: "" });
+            setMessage({
+                errorMsg: data.msg || "Admin authentication failed.",
+                successMsg: "",
+            });
+        } catch (error) {
+            console.error("Admin auth request failed", error);
+            setMessage({
+                errorMsg:
+                    "Unable to connect to the server. Ensure backend is running on http://localhost:8000.",
+                successMsg: "",
+            });
         }
     };
 
@@ -172,18 +193,6 @@ export default function signin({ adminIdCookie }) {
                                     }
                                 />
 
-                                <p className="text-sm text-gray-700 mt-6">
-                                    *You have the option to designate yourself
-                                    as an admin for testing purposes by
-                                    following this{" "}
-                                    <a
-                                        href="https://invite-developers.vercel.app/"
-                                        target="_blank"
-                                        className="text-[color:var(--darker-secondary-color)]"
-                                    >
-                                        link.
-                                    </a>
-                                </p>
 
                                 <button
                                     type="submit"

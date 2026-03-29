@@ -8,7 +8,7 @@ function TeamSection({images: developers}) {
                 <br />
                 <br />
                 <br />
-                <div className="max-w-3xl mx-auto text-center pb-12 md:pb-16">
+                {/* <div className="max-w-3xl mx-auto text-center pb-12 md:pb-16">
                     <h2 className="h2 mb-4">
                         Our{" "}
                         <span className="text-[color:var(--secondary-color)]">
@@ -16,8 +16,8 @@ function TeamSection({images: developers}) {
                         </span>{" "}
                         Team
                     </h2>
-                </div>
-                <div className="mt-10 grid grid-cols-1 gap-16 sm:grid-cols-2 lg:grid-cols-4">
+                </div> */}
+                {/* <div className="mt-10 grid grid-cols-1 gap-16 sm:grid-cols-2 lg:grid-cols-4">
                     {developers?.map((developer) => (
                         <div key={developer?.id} className="flex flex-col">
                             <div className="flex-shrink-0">
@@ -82,7 +82,7 @@ function TeamSection({images: developers}) {
                             </div>
                         </div>
                     ))}
-                </div>
+                </div> */}
             </div>
         </div>
     );
